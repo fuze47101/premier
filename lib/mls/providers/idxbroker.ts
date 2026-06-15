@@ -275,12 +275,28 @@ export const idxBrokerProvider: MLSProvider = {
   },
 
   async getFeaturedListings(limit = 6) {
+    // Strategy: try /clients/featured first (curated by broker), fall back to
+    // /clients/activels (all active listings owned by the account) so the
+    // homepage always has something to show.
     try {
-      const data = await fetchIDX<IDXBrokerListing[]>("/clients/featured");
-      const arr = Array.isArray(data) ? data : [];
-      return arr.slice(0, limit).map(fromIDXBrokerListing);
+      const featured = await fetchIDX<IDXBrokerListing[] | Record<string, IDXBrokerListing>>(
+        "/clients/featured",
+      );
+      const featuredArr = Array.isArray(featured) ? featured : Object.values(featured ?? {});
+      if (featuredArr.length > 0) {
+        return featuredArr.slice(0, limit).map(fromIDXBrokerListing);
+      }
     } catch (err) {
-      console.error("[idxBroker] getFeaturedListings failed:", err);
+      console.warn("[idxBroker] /clients/featured returned no usable data:", err);
+    }
+    try {
+      const active = await fetchIDX<IDXBrokerListing[] | Record<string, IDXBrokerListing>>(
+        "/clients/activels",
+      );
+      const activeArr = Array.isArray(active) ? active : Object.values(active ?? {});
+      return activeArr.slice(0, limit).map(fromIDXBrokerListing);
+    } catch (err) {
+      console.error("[idxBroker] getFeaturedListings fallback failed:", err);
       return [];
     }
   },
