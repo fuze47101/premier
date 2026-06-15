@@ -230,65 +230,119 @@ export default function HomePageClient({ featuredListings, activeListingsCount }
 
       <section className="listings">
         <div className="container">
-          <div className="section-head">
-            <div className="eyebrow">Every Active Home in Tooele County</div>
-            <h2>The full Tooele <em>MLS, live.</em></h2>
-            <p>
-              Every active listing across Tooele, Stansbury Park, Grantsville, Erda, and the rest
-              of the county &mdash; updated continuously from the MLS. Search by neighborhood,
-              price, beds, baths, or lot size.
-            </p>
+          <div className="listings-head">
+            <div>
+              <div className="eyebrow">Featured Properties &middot; Hand-Picked by Premier</div>
+              <h2>Homes <em>worth a closer look.</em></h2>
+            </div>
+            <div className="listing-filters">
+              {listingFilters.map((f) => (
+                <button
+                  key={f}
+                  className={f === activeFilter ? "active" : ""}
+                  onClick={() => setActiveFilter(f)}
+                >
+                  {f}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Live IDX widget embed — real Tooele listings from forsale.homesintooele.com */}
-          <div style={{
-            marginTop: 40,
-            borderRadius: 8,
-            overflow: "hidden",
-            border: "1px solid var(--line)",
-            background: "var(--white)",
-            boxShadow: "var(--shadow)",
-          }}>
-            <iframe
-              src="https://forsale.homesintooele.com/idx/search/advanced"
-              title="Search active Tooele County listings"
+          {filteredListings.length > 0 ? (
+            <div className="listing-grid">
+              {filteredListings.slice(0, 6).map((l) => {
+                const badge = getListingBadge(l);
+                return (
+                  <a
+                    key={l.listingKey}
+                    href={listingUrl(l)}
+                    className="listing-card"
+                    style={{ textDecoration: "none", color: "inherit" }}
+                  >
+                    <div
+                      className="listing-img"
+                      style={{ backgroundImage: `url(${getPrimaryPhoto(l)})` }}
+                    >
+                      <span className="listing-badge" style={tone(badge.tone)}>
+                        {badge.label}
+                      </span>
+                      {l.hasVideoTour && <span className="listing-video">▶ VIDEO TOUR</span>}
+                    </div>
+                    <div className="listing-body">
+                      <div className="listing-price">{formatPrice(l.financial.listPrice)}</div>
+                      <div className="listing-addr">{formatAddress(l)}</div>
+                      <div className="listing-meta">
+                        {l.features.bedrooms > 0 && (
+                          <span><strong>{l.features.bedrooms}</strong>bd</span>
+                        )}
+                        {l.features.bathroomsTotal > 0 && (
+                          <span><strong>{l.features.bathroomsTotal}</strong>ba</span>
+                        )}
+                        {l.features.livingArea > 0 && (
+                          <span><strong>{formatSqft(l.features.livingArea)}</strong>sqft</span>
+                        )}
+                        {l.features.lotSizeAcres && (
+                          <span><strong>{l.features.lotSizeAcres}</strong>ac</span>
+                        )}
+                      </div>
+                    </div>
+                  </a>
+                );
+              })}
+            </div>
+          ) : (
+            <div
               style={{
-                width: "100%",
-                height: "1100px",
-                border: 0,
-                display: "block",
+                background: "var(--white)",
+                border: "1px solid var(--line)",
+                borderRadius: 8,
+                padding: "80px 48px",
+                textAlign: "center",
+                marginTop: 40,
               }}
-              loading="lazy"
-            />
-          </div>
+            >
+              <div
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "2rem",
+                  color: "var(--navy)",
+                  fontWeight: 500,
+                  marginBottom: 16,
+                  fontStyle: "italic",
+                }}
+              >
+                Premier&rsquo;s featured Tooele picks, coming up next.
+              </div>
+              <p style={{ maxWidth: 540, margin: "0 auto 32px" }}>
+                Our team curates a fresh set of standout Tooele homes each week &mdash; from
+                Stansbury lake-view to Erda acreage to new builds at Highland. Want the full
+                Tooele MLS in the meantime?
+              </p>
+              <a
+                href="https://forsale.homesintooele.com/idx/search/advanced"
+                target="_blank"
+                rel="noopener"
+                className="btn btn-primary"
+                style={{ textDecoration: "none", padding: "16px 32px" }}
+              >
+                Browse All Active Listings &rarr;
+              </a>
+            </div>
+          )}
 
-          <div style={{
-            textAlign: "center",
-            marginTop: 40,
-            display: "flex",
-            gap: 16,
-            justifyContent: "center",
-            flexWrap: "wrap",
-          }}>
-            <a
-              href="https://forsale.homesintooele.com/idx/search/advanced"
-              target="_blank"
-              rel="noopener"
-              className="btn btn-primary"
-              style={{ textDecoration: "none", padding: "18px 36px", fontSize: ".95rem" }}
-            >
-              Open Full Search &rarr;
-            </a>
-            <a
-              href="https://forsale.homesintooele.com/idx/map/mapsearch"
-              target="_blank"
-              rel="noopener"
-              className="btn btn-ghost"
-              style={{ textDecoration: "none", padding: "18px 36px", fontSize: ".95rem" }}
-            >
-              Map Search
-            </a>
-          </div>
+          {filteredListings.length > 0 && (
+            <div className="listings-cta">
+              <a
+                href="https://forsale.homesintooele.com/idx/search/advanced"
+                target="_blank"
+                rel="noopener"
+                className="btn btn-ghost"
+                style={{ textDecoration: "none" }}
+              >
+                View All {activeListingsCount ? `${activeListingsCount} ` : ""}Active Listings
+              </a>
+            </div>
+          )}
         </div>
       </section>
 
