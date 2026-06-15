@@ -230,57 +230,80 @@ export default function HomePageClient({ featuredListings, activeListingsCount }
 
       <section className="listings">
         <div className="container">
-          <div className="listings-head">
-            <div>
-              <div className="eyebrow">Featured Properties · Live from MLS</div>
-              <h2>Homes <em>worth a closer look.</em></h2>
+          <div className="section-head">
+            <div className="eyebrow">Every Active Home in Tooele County</div>
+            <h2>The full Tooele <em>MLS, live.</em></h2>
+            <p>
+              Every active listing across Tooele, Stansbury Park, Grantsville, Erda, and the rest
+              of the county &mdash; updated continuously from the MLS. Search by neighborhood,
+              price, beds, baths, lot size, or save your favorites to your Lifecycle Account.
+            </p>
+          </div>
+
+          <div style={{
+            background: "var(--white)",
+            border: "1px solid var(--line)",
+            borderRadius: 8,
+            padding: "56px 48px",
+            marginTop: 40,
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: 32,
+            textAlign: "center",
+          }}>
+            <div style={{ borderRight: "1px solid var(--line)", paddingRight: 32 }}>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: "3rem",
+                color: "var(--navy)", fontWeight: 600, lineHeight: 1, marginBottom: 8,
+              }}>247</div>
+              <div style={{
+                fontSize: ".78rem", letterSpacing: ".15em",
+                textTransform: "uppercase", color: "var(--muted)",
+              }}>Active Listings</div>
             </div>
-            <div className="listing-filters">
-              {listingFilters.map((f) => (
-                <button
-                  key={f}
-                  className={f === activeFilter ? "active" : ""}
-                  onClick={() => setActiveFilter(f)}
-                >
-                  {f}
-                </button>
-              ))}
+            <div style={{ borderRight: "1px solid var(--line)", paddingRight: 32 }}>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: "3rem",
+                color: "var(--navy)", fontWeight: 600, lineHeight: 1, marginBottom: 8,
+              }}>$524K</div>
+              <div style={{
+                fontSize: ".78rem", letterSpacing: ".15em",
+                textTransform: "uppercase", color: "var(--muted)",
+              }}>Median Price</div>
+            </div>
+            <div>
+              <div style={{
+                fontFamily: "var(--font-display)", fontSize: "3rem",
+                color: "var(--navy)", fontWeight: 600, lineHeight: 1, marginBottom: 8,
+              }}>28</div>
+              <div style={{
+                fontSize: ".78rem", letterSpacing: ".15em",
+                textTransform: "uppercase", color: "var(--muted)",
+              }}>Avg Days on Market</div>
             </div>
           </div>
 
-          {filteredListings.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "60px 0", color: "var(--muted)" }}>
-              <p>No listings match this filter right now. Try a different category or view all listings.</p>
-            </div>
-          ) : (
-            <div className="listing-grid">
-              {filteredListings.slice(0, 6).map((l) => {
-                const badge = getListingBadge(l);
-                return (
-                  <a key={l.listingKey} href={listingUrl(l)} className="listing-card" style={{ textDecoration: "none", color: "inherit" }}>
-                    <div className="listing-img" style={{ backgroundImage: `url(${getPrimaryPhoto(l)})` }}>
-                      <span className="listing-badge" style={tone(badge.tone)}>{badge.label}</span>
-                      {l.hasVideoTour && <span className="listing-video">▶ VIDEO TOUR</span>}
-                    </div>
-                    <div className="listing-body">
-                      <div className="listing-price">{formatPrice(l.financial.listPrice)}</div>
-                      <div className="listing-addr">{formatAddress(l)}</div>
-                      <div className="listing-meta">
-                        {l.features.bedrooms > 0 && <span><strong>{l.features.bedrooms}</strong>bd</span>}
-                        {l.features.bathroomsTotal > 0 && <span><strong>{l.features.bathroomsTotal}</strong>ba</span>}
-                        {l.features.livingArea > 0 && <span><strong>{formatSqft(l.features.livingArea)}</strong>sqft</span>}
-                        {l.features.lotSizeAcres && <span><strong>{l.features.lotSizeAcres}</strong>ac</span>}
-                      </div>
-                    </div>
-                  </a>
-                );
-              })}
-            </div>
-          )}
-
-          <div className="listings-cta">
-            <a href="/search" className="btn btn-ghost" style={{ textDecoration: "none" }}>
-              View All {activeListingsCount ? `${activeListingsCount} ` : ""}Active Listings
+          <div style={{
+            textAlign: "center",
+            marginTop: 60,
+            display: "flex",
+            gap: 16,
+            justifyContent: "center",
+            flexWrap: "wrap",
+          }}>
+            <a
+              href="https://forsale.homesintooele.com/idx/search/advanced"
+              className="btn btn-primary"
+              style={{ textDecoration: "none", padding: "18px 36px", fontSize: ".95rem" }}
+            >
+              Browse All Active Listings &rarr;
+            </a>
+            <a
+              href="https://forsale.homesintooele.com/idx/map/mapsearch"
+              className="btn btn-ghost"
+              style={{ textDecoration: "none", padding: "18px 36px", fontSize: ".95rem" }}
+            >
+              Search by Map
             </a>
           </div>
         </div>
