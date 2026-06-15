@@ -280,8 +280,11 @@ function buildHeaders(): Record<string, string> {
     outputtype: "json",
     apiversion: "1.8.0", // Match account's API Preferences setting in IDX Broker dashboard
   };
-  // Account ID doubles as ancillary key on many IDX Broker accounts.
-  const ancillary = getAncillaryKey() ?? getAccountId();
+  // IMPORTANT: ancillarykey is ONLY for partner integrations using someone
+  // else's account. For our own Account API (with our own access key), we
+  // must NOT send ancillarykey — doing so causes IDX Broker to interpret the
+  // request as a partner request and reject it.
+  const ancillary = getAncillaryKey();
   if (ancillary) headers.ancillarykey = ancillary;
   return headers;
 }
