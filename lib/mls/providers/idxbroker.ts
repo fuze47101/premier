@@ -7,9 +7,9 @@
 // with 5-min revalidation to stay well under that.
 //
 // Env vars (set in Railway → Variables):
-//   IDX_BROKER_ACCESS_KEY   — partner API key
-//   IDX_BROKER_ACCOUNT_ID   — 5-digit account ID
-//   IDX_BROKER_ANCILLARY_KEY — optional secondary key
+//   IDX_BROKER_getAccessKey()   — partner API key
+//   IDX_BROKER_getAccountId()   — 5-digit account ID
+//   IDX_BROKER_getAncillaryKey() — optional secondary key
 //   PREMIER_TOOELE_CITIES   — optional override (comma-separated)
 // =============================================================
 import type {
@@ -19,11 +19,27 @@ import type {
   ListingSearchResult,
   MLSProvider,
 } from "../types";
+import { FALLBACK_MLS_CONFIG } from "../fallback-config";
 
 const BASE_URL = "https://api.idxbroker.com";
-const ACCESS_KEY = process.env.IDX_BROKER_ACCESS_KEY;
-const ACCOUNT_ID = process.env.IDX_BROKER_ACCOUNT_ID;
-const ANCILLARY_KEY = process.env.IDX_BROKER_ANCILLARY_KEY;
+
+// Strip surrounding quotes from env values
+function cleanEnv(v: string | undefined): string | undefined {
+  if (!v) return undefined;
+  const cleaned = v.trim().replace(/^['"]+|['"]+$/g, "");
+  return cleaned || undefined;
+}
+
+// Read each call so Railway env var updates take effect without a code change.
+function getAccessKey(): string {
+  return cleanEnv(process.env.IDX_BROKER_ACCESS_KEY) ?? FALLBACK_MLS_CONFIG.idxBroker.accessKey;
+}
+function getAccountId(): string {
+  return cleanEnv(process.env.IDX_BROKER_ACCOUNT_ID) ?? FALLBACK_MLS_CONFIG.idxBroker.accountId;
+}
+function getAncillaryKey(): string | undefined {
+  return cleanEnv(process.env.IDX_BROKER_ANCILLARY_KEY);
+}
 
 // =============================================================
 // Geographic filter — Premier sells in Tooele County, UT.
@@ -256,17 +272,18 @@ function normalizeResponse(data: unknown): IDXBrokerListing[] {
 }
 
 function buildHeaders(): Record<string, string> {
-  if (!ACCESS_KEY) {
+  if (!getAccessKey()) {
     throw new Error(
-      "IDX_BROKER_ACCESS_KEY is not set. Configure it in Railway → Variables and locally in .env.local.",
+      "IDX_BROKER_getAccessKey() is not set. Configure it in Railway → Variables and locally in .env.local.",
     );
   }
   const headers: Record<string, string> = {
-    accesskey: ACCESS_KEY,
+    accesskey: getAccessKey(),
     outputtype: "json",
     apiversion: "1.8.0",
   };
-  if (ANCILLARY_KEY) headers.ancillarykey = ANCILLARY_KEY;
+  const ancillary = getAncillaryKey();
+  if (ancillary) headers.ancillarykey = ancillary;
   return headers;
 }
 
@@ -303,7 +320,7 @@ export const idxBrokerProvider: MLSProvider = {
     options: ListingSearchOptions = {},
   ): Promise<ListingSearchResult> {
     const useMLSSearch = !filters.isPremierListing;
-    const path = useMLSSearch ? `/mls/search/${ACCOUNT_ID ?? ""}` : "/clients/activels";
+    const path = useMLSSearch ? `/mls/search/${getAccountId() ?? ""}` : "/clients/activels";
 
     const params = new URLSearchParams();
     if (filters.minPrice) params.set("lp", String(filters.minPrice));

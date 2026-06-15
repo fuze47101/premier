@@ -12,14 +12,25 @@ import type {
 import { mockProvider } from "./providers/mock";
 import { bridgeProvider } from "./providers/bridge";
 import { idxBrokerProvider } from "./providers/idxbroker";
+import { FALLBACK_MLS_CONFIG } from "./fallback-config";
 
 type ProviderName = "mock" | "idxbroker" | "bridge" | "trestle" | "spark";
 
 let _loggedOnce = false;
 
+// Strip surrounding quotes — defends against env vars like MLS_PROVIDER="idxbroker"
+// where some hosts include the quotes literally in the value.
+function cleanEnv(v: string | undefined): string {
+  if (!v) return "";
+  return v.trim().replace(/^['"]+|['"]+$/g, "");
+}
+
 function resolveProvider(): MLSProvider {
-  const raw = (process.env.MLS_PROVIDER ?? "").trim().toLowerCase();
-  const requested = (raw || "mock") as ProviderName;
+  // Prefer env var. Fall back to the in-repo config so the site works even when
+  // Railway hasn't injected variables into the runtime container.
+  const rawEnv = cleanEnv(process.env.MLS_PROVIDER);
+  const raw = rawEnv || FALLBACK_MLS_CONFIG.provider;
+  const requested = raw.toLowerCase() as ProviderName;
 
   if (!_loggedOnce) {
     console.info(
