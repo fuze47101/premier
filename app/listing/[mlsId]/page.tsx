@@ -11,7 +11,7 @@ import {
   getPrimaryPhoto,
 } from "@/lib/mls/format";
 
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ mlsId: string }>;

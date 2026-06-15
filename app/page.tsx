@@ -6,7 +6,10 @@
 import HomePageClient from "./_components/HomePageClient";
 import { mls } from "@/lib/mls/client";
 
-export const revalidate = 300; // 5 min
+// Force runtime rendering so Railway env vars (MLS_PROVIDER, IDX_BROKER_*) are
+// always read at request time, not baked in at build. Listing data is cached
+// for 5 minutes by the underlying fetch (revalidate: 300 in the provider).
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   // Pull featured + a count of active in parallel so the hero + market widget can show live numbers
