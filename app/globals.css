@@ -211,10 +211,8 @@ header {
 }
 .hc-2 {
   width: 54%; height: 42%; bottom: 0; left: 0;
-  background-image:
-    linear-gradient(135deg, rgba(15,27,45,.2) 0%, transparent 70%),
-    url('https://images.unsplash.com/photo-1582794543139-8ac9cb0f7b11?w=700&q=80');
-  background-size: cover; background-position: center;
+  /* Brand-color gradient — no photo until we have real Tooele/Highland photography */
+  background: linear-gradient(135deg, #C9A776 0%, #8B6F48 70%, #6B4E2C 100%);
   border: 6px solid var(--navy);
 }
 .hc-tag {
