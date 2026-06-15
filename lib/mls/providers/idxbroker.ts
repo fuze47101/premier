@@ -278,7 +278,7 @@ function buildHeaders(): Record<string, string> {
   const headers: Record<string, string> = {
     accesskey: getAccessKey(),
     outputtype: "json",
-    apiversion: "1.8.0",
+    apiversion: "1.8.0", // Match account's API Preferences setting in IDX Broker dashboard
   };
   // Account ID doubles as ancillary key on many IDX Broker accounts.
   const ancillary = getAncillaryKey() ?? getAccountId();
@@ -381,11 +381,16 @@ export const idxBrokerProvider: MLSProvider = {
   },
 
   async getFeaturedListings(limit = 6): Promise<Listing[]> {
+    // Per IDX Broker support, this plan tier only covers /clients/* endpoints
+    // (the office's own listings), not full /mls/search. So we don't fall
+    // through to MLS search — just use the two client endpoints.
     const tryEndpoint = async (path: string): Promise<Listing[]> => {
       try {
         const data = await fetchIDX(path);
         const arr = normalizeResponse(data);
-        return arr.map(fromIDXBrokerListing).filter(isInTooele);
+        // Don't post-filter to Tooele on office listings — Premier is a Tooele
+        // brokerage so all their listings should already be in-county.
+        return arr.map(fromIDXBrokerListing);
       } catch (err) {
         console.warn(`[idxBroker] ${path} unavailable:`, err);
         return [];
@@ -396,12 +401,10 @@ export const idxBrokerProvider: MLSProvider = {
     if (listings.length === 0) listings = await tryEndpoint("/clients/activels");
 
     if (listings.length === 0) {
-      console.info("[idxBroker] falling back to /mls/search for Tooele");
-      const result = await idxBrokerProvider.searchListings(
-        { status: "Active" },
-        { limit: 50, orderBy: "ModificationTimestamp" },
+      console.info(
+        "[idxBroker] no office listings returned. " +
+          "Check IDX Broker → My Office → Listings, ensure listings are imported/synced.",
       );
-      listings = result.listings;
     }
 
     return listings.slice(0, limit);
