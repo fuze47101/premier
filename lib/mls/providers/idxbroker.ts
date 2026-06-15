@@ -24,6 +24,37 @@ const ACCESS_KEY = process.env.IDX_BROKER_ACCESS_KEY;
 const ACCOUNT_ID = process.env.IDX_BROKER_ACCOUNT_ID;
 const ANCILLARY_KEY = process.env.IDX_BROKER_ANCILLARY_KEY;
 
+// =============================================================
+// Geographic filter — Premier sells in Tooele County, UT.
+// Even if the IDX feed returns listings from a wider geography,
+// we filter to these cities/zips. Override via env var if needed.
+// =============================================================
+const TOOELE_CITIES = (process.env.PREMIER_TOOELE_CITIES ?? [
+  "Tooele",
+  "Stansbury Park",
+  "Grantsville",
+  "Erda",
+  "Lake Point",
+  "Stockton",
+  "Wendover",
+  "Rush Valley",
+  "Vernon",
+  "Ophir",
+  "Dugway",
+].join(",")).split(",").map((c) => c.trim().toLowerCase());
+
+const TOOELE_ZIPS = ["84029", "84034", "84069", "84071", "84072", "84074", "84080", "84083"];
+
+function isInTooele(l: { location: { city: string; postalCode: string; county?: string } }): boolean {
+  const city = l.location.city.toLowerCase().trim();
+  const zip = l.location.postalCode?.trim();
+  const county = l.location.county?.toLowerCase().trim();
+  if (county === "tooele") return true;
+  if (TOOELE_CITIES.includes(city)) return true;
+  if (TOOELE_ZIPS.includes(zip)) return true;
+  return false;
+}
+
 // IDX Broker returns slightly different shapes per endpoint.
 // This shape covers /clients/featured and /clients/listing/{id}.
 interface IDXBrokerListing {
@@ -237,8 +268,6 @@ export const idxBrokerProvider: MLSProvider = {
   },
 
   async searchListings(filters = {}, options = {}) {
-    // /clients/activels returns active listings owned by your account
-    // /mls/search returns full MLS-wide search (IDX-permitted)
     const useMLSSearch = !filters.isPremierListing;
     const path = useMLSSearch ? `/mls/search/${ACCOUNT_ID ?? ""}` : "/clients/activels";
 
@@ -248,25 +277,39 @@ export const idxBrokerProvider: MLSProvider = {
     if (filters.minBedrooms) params.set("bd", String(filters.minBedrooms));
     if (filters.minBathrooms) params.set("ba", String(filters.minBathrooms));
     if (filters.minLivingArea) params.set("sqft", String(filters.minLivingArea));
+
+    // Default to Tooele cities unless the caller specifies a city.
     if (filters.city) {
       const cities = Array.isArray(filters.city) ? filters.city : [filters.city];
       params.set("city", cities.join(","));
+    } else {
+      params.set("city", TOOELE_CITIES.map((c) => c.split(" ").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ")).join(","));
     }
-    if (options.limit) params.set("per", String(options.limit));
+
+    if (options.limit) params.set("per", String(Math.max(options.limit, 50))); // request extra so post-filter still has supply
     if (options.offset) params.set("start", String(options.offset));
 
     const qs = params.toString();
     try {
-      const data = await fetchIDX<IDXBrokerListing[] | { listings: IDXBrokerListing[] }>(
+      const data = await fetchIDX<IDXBrokerListing[] | { listings: IDXBrokerListing[] } | Record<string, IDXBrokerListing>>(
         `${path}${qs ? `?${qs}` : ""}`,
       );
-      const arr = Array.isArray(data) ? data : (data.listings ?? []);
-      const listings = arr.map(fromIDXBrokerListing);
+      const arr: IDXBrokerListing[] = Array.isArray(data)
+        ? data
+        : "listings" in (data as object)
+        ? (data as { listings: IDXBrokerListing[] }).listings
+        : Object.values(data as Record<string, IDXBrokerListing>);
+
+      const all = arr.map(fromIDXBrokerListing);
+      const tooele = all.filter(isInTooele); // hard geo guard
+
+      const limit = options.limit ?? tooele.length;
+      const offset = options.offset ?? 0;
       return {
-        listings,
-        total: listings.length, // IDX Broker doesn't return a total count consistently
-        limit: options.limit ?? listings.length,
-        offset: options.offset ?? 0,
+        listings: tooele.slice(offset, offset + limit),
+        total: tooele.length,
+        limit,
+        offset,
       } satisfies ListingSearchResult;
     } catch (err) {
       console.error("[idxBroker] searchListings failed:", err);
@@ -275,29 +318,35 @@ export const idxBrokerProvider: MLSProvider = {
   },
 
   async getFeaturedListings(limit = 6) {
-    // Strategy: try /clients/featured first (curated by broker), fall back to
-    // /clients/activels (all active listings owned by the account) so the
-    // homepage always has something to show.
-    try {
-      const featured = await fetchIDX<IDXBrokerListing[] | Record<string, IDXBrokerListing>>(
-        "/clients/featured",
-      );
-      const featuredArr = Array.isArray(featured) ? featured : Object.values(featured ?? {});
-      if (featuredArr.length > 0) {
-        return featuredArr.slice(0, limit).map(fromIDXBrokerListing);
+    // Strategy:
+    //   1. Try /clients/featured (broker-curated, owned by account)
+    //   2. Fall back to /clients/activels (all active listings on account)
+    //   3. Final fallback: /mls/search filtered to Tooele cities
+    // Always post-filter to Tooele geography so out-of-area listings never render.
+    const tryEndpoint = async (path: string): Promise<Listing[]> => {
+      try {
+        const data = await fetchIDX<IDXBrokerListing[] | Record<string, IDXBrokerListing>>(path);
+        const arr = Array.isArray(data) ? data : Object.values(data ?? {});
+        return arr.map(fromIDXBrokerListing).filter(isInTooele);
+      } catch (err) {
+        console.warn(`[idxBroker] ${path} unavailable:`, err);
+        return [];
       }
-    } catch (err) {
-      console.warn("[idxBroker] /clients/featured returned no usable data:", err);
-    }
-    try {
-      const active = await fetchIDX<IDXBrokerListing[] | Record<string, IDXBrokerListing>>(
-        "/clients/activels",
+    };
+
+    let listings = await tryEndpoint("/clients/featured");
+    if (listings.length === 0) listings = await tryEndpoint("/clients/activels");
+
+    if (listings.length === 0) {
+      // Last resort: MLS-wide IDX search restricted to Tooele cities
+      console.info("[idxBroker] falling back to /mls/search for Tooele");
+      const result = await this.searchListings(
+        { status: "Active" },
+        { limit: 50, orderBy: "ModificationTimestamp" },
       );
-      const activeArr = Array.isArray(active) ? active : Object.values(active ?? {});
-      return activeArr.slice(0, limit).map(fromIDXBrokerListing);
-    } catch (err) {
-      console.error("[idxBroker] getFeaturedListings fallback failed:", err);
-      return [];
+      listings = result.listings;
     }
+
+    return listings.slice(0, limit);
   },
 };
