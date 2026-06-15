@@ -273,18 +273,35 @@ function normalizeResponse(data: unknown): IDXBrokerListing[] {
 
 function buildHeaders(): Record<string, string> {
   if (!getAccessKey()) {
-    throw new Error(
-      "IDX_BROKER_getAccessKey() is not set. Configure it in Railway → Variables and locally in .env.local.",
-    );
+    throw new Error("IDX_BROKER_ACCESS_KEY is not set.");
   }
   const headers: Record<string, string> = {
     accesskey: getAccessKey(),
     outputtype: "json",
     apiversion: "1.8.0",
   };
-  const ancillary = getAncillaryKey();
+  // Account ID doubles as ancillary key on many IDX Broker accounts.
+  const ancillary = getAncillaryKey() ?? getAccountId();
   if (ancillary) headers.ancillarykey = ancillary;
   return headers;
+}
+
+// Cache the approved MLS IDs (e.g. "a000") for the account.
+let _approvedIdxIds: string[] | null = null;
+async function getApprovedIdxIds(): Promise<string[]> {
+  if (_approvedIdxIds !== null) return _approvedIdxIds;
+  try {
+    const data = await fetchIDX<Record<string, { idxID?: string }> | Array<{ idxID?: string }>>(
+      "/clients/approvedmls",
+    );
+    const arr = Array.isArray(data) ? data : Object.values(data ?? {});
+    _approvedIdxIds = arr.map((m) => m.idxID).filter((x): x is string => !!x);
+    console.info("[idxBroker] approved MLS IDs:", _approvedIdxIds);
+  } catch (err) {
+    console.warn("[idxBroker] /clients/approvedmls failed:", err);
+    _approvedIdxIds = [];
+  }
+  return _approvedIdxIds;
 }
 
 async function fetchIDX<T = unknown>(path: string): Promise<T> {
@@ -319,8 +336,13 @@ export const idxBrokerProvider: MLSProvider = {
     filters: ListingSearchFilters = {},
     options: ListingSearchOptions = {},
   ): Promise<ListingSearchResult> {
-    const useMLSSearch = !filters.isPremierListing;
-    const path = useMLSSearch ? `/mls/search/${getAccountId() ?? ""}` : "/clients/activels";
+    // /mls/search needs the IDX feed ID (e.g. "a001"), not the account ID.
+    // Fetch the approved feeds once and use the first one.
+    const idxIds = await getApprovedIdxIds();
+    const idxID = idxIds[0];
+
+    const useMLSSearch = !filters.isPremierListing && idxID;
+    const path = useMLSSearch ? `/mls/search/${idxID}` : "/clients/activels";
 
     const params = new URLSearchParams();
     if (filters.minPrice) params.set("lp", String(filters.minPrice));
@@ -329,11 +351,10 @@ export const idxBrokerProvider: MLSProvider = {
     if (filters.minBathrooms) params.set("ba", String(filters.minBathrooms));
     if (filters.minLivingArea) params.set("sqft", String(filters.minLivingArea));
 
+    // City filter — let IDX Broker decide everything via post-filter to be safe.
     if (filters.city) {
       const cities = Array.isArray(filters.city) ? filters.city : [filters.city];
       params.set("city", cities.join(","));
-    } else {
-      params.set("city", TOOELE_CITIES.join(","));
     }
 
     if (options.limit) params.set("per", String(Math.max(options.limit, 50)));
