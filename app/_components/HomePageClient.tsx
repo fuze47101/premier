@@ -236,56 +236,35 @@ export default function HomePageClient({ featuredListings, activeListingsCount }
             <p>
               Every active listing across Tooele, Stansbury Park, Grantsville, Erda, and the rest
               of the county &mdash; updated continuously from the MLS. Search by neighborhood,
-              price, beds, baths, lot size, or save your favorites to your Lifecycle Account.
+              price, beds, baths, or lot size.
             </p>
           </div>
 
+          {/* Live IDX widget embed — real Tooele listings from forsale.homesintooele.com */}
           <div style={{
-            background: "var(--white)",
-            border: "1px solid var(--line)",
-            borderRadius: 8,
-            padding: "56px 48px",
             marginTop: 40,
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: 32,
-            textAlign: "center",
+            borderRadius: 8,
+            overflow: "hidden",
+            border: "1px solid var(--line)",
+            background: "var(--white)",
+            boxShadow: "var(--shadow)",
           }}>
-            <div style={{ borderRight: "1px solid var(--line)", paddingRight: 32 }}>
-              <div style={{
-                fontFamily: "var(--font-display)", fontSize: "3rem",
-                color: "var(--navy)", fontWeight: 600, lineHeight: 1, marginBottom: 8,
-              }}>247</div>
-              <div style={{
-                fontSize: ".78rem", letterSpacing: ".15em",
-                textTransform: "uppercase", color: "var(--muted)",
-              }}>Active Listings</div>
-            </div>
-            <div style={{ borderRight: "1px solid var(--line)", paddingRight: 32 }}>
-              <div style={{
-                fontFamily: "var(--font-display)", fontSize: "3rem",
-                color: "var(--navy)", fontWeight: 600, lineHeight: 1, marginBottom: 8,
-              }}>$524K</div>
-              <div style={{
-                fontSize: ".78rem", letterSpacing: ".15em",
-                textTransform: "uppercase", color: "var(--muted)",
-              }}>Median Price</div>
-            </div>
-            <div>
-              <div style={{
-                fontFamily: "var(--font-display)", fontSize: "3rem",
-                color: "var(--navy)", fontWeight: 600, lineHeight: 1, marginBottom: 8,
-              }}>28</div>
-              <div style={{
-                fontSize: ".78rem", letterSpacing: ".15em",
-                textTransform: "uppercase", color: "var(--muted)",
-              }}>Avg Days on Market</div>
-            </div>
+            <iframe
+              src="https://forsale.homesintooele.com/idx/search/advanced"
+              title="Search active Tooele County listings"
+              style={{
+                width: "100%",
+                height: "1100px",
+                border: 0,
+                display: "block",
+              }}
+              loading="lazy"
+            />
           </div>
 
           <div style={{
             textAlign: "center",
-            marginTop: 60,
+            marginTop: 40,
             display: "flex",
             gap: 16,
             justifyContent: "center",
@@ -293,17 +272,21 @@ export default function HomePageClient({ featuredListings, activeListingsCount }
           }}>
             <a
               href="https://forsale.homesintooele.com/idx/search/advanced"
+              target="_blank"
+              rel="noopener"
               className="btn btn-primary"
               style={{ textDecoration: "none", padding: "18px 36px", fontSize: ".95rem" }}
             >
-              Browse All Active Listings &rarr;
+              Open Full Search &rarr;
             </a>
             <a
               href="https://forsale.homesintooele.com/idx/map/mapsearch"
+              target="_blank"
+              rel="noopener"
               className="btn btn-ghost"
               style={{ textDecoration: "none", padding: "18px 36px", fontSize: ".95rem" }}
             >
-              Search by Map
+              Map Search
             </a>
           </div>
         </div>
