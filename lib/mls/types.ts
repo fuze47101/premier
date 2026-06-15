@@ -175,6 +175,7 @@ export interface ListingSearchFilters {
   minYearBuilt?: number;
   features?: string[]; // lifestyle filters: "acreage", "lake-view", "new-build", "equestrian"
   isUpDwellNewBuild?: boolean;
+  isPremierListing?: boolean;
   hasOpenHouse?: boolean;
   hasVideoTour?: boolean;
 }

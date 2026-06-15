@@ -6,10 +6,11 @@
 // Rate limit: ~6000 req/hr per account. We use Next.js ISR
 // with 5-min revalidation to stay well under that.
 //
-// Env vars required (set in Railway → Variables):
+// Env vars (set in Railway → Variables):
 //   IDX_BROKER_ACCESS_KEY   — partner API key
-//   IDX_BROKER_ACCOUNT_ID   — 5-digit account ID (e.g., 58276)
-//   IDX_BROKER_ANCILLARY_KEY — optional secondary key (some accounts)
+//   IDX_BROKER_ACCOUNT_ID   — 5-digit account ID
+//   IDX_BROKER_ANCILLARY_KEY — optional secondary key
+//   PREMIER_TOOELE_CITIES   — optional override (comma-separated)
 // =============================================================
 import type {
   Listing,
@@ -26,10 +27,8 @@ const ANCILLARY_KEY = process.env.IDX_BROKER_ANCILLARY_KEY;
 
 // =============================================================
 // Geographic filter — Premier sells in Tooele County, UT.
-// Even if the IDX feed returns listings from a wider geography,
-// we filter to these cities/zips. Override via env var if needed.
 // =============================================================
-const TOOELE_CITIES = (process.env.PREMIER_TOOELE_CITIES ?? [
+const DEFAULT_TOOELE_CITIES = [
   "Tooele",
   "Stansbury Park",
   "Grantsville",
@@ -41,35 +40,43 @@ const TOOELE_CITIES = (process.env.PREMIER_TOOELE_CITIES ?? [
   "Vernon",
   "Ophir",
   "Dugway",
-].join(",")).split(",").map((c) => c.trim().toLowerCase());
+];
+
+const TOOELE_CITIES = (
+  process.env.PREMIER_TOOELE_CITIES?.split(",").map((c) => c.trim()).filter(Boolean) ??
+  DEFAULT_TOOELE_CITIES
+);
+
+const TOOELE_CITIES_LOWER = TOOELE_CITIES.map((c) => c.toLowerCase());
 
 const TOOELE_ZIPS = ["84029", "84034", "84069", "84071", "84072", "84074", "84080", "84083"];
 
-function isInTooele(l: { location: { city: string; postalCode: string; county?: string } }): boolean {
-  const city = l.location.city.toLowerCase().trim();
-  const zip = l.location.postalCode?.trim();
-  const county = l.location.county?.toLowerCase().trim();
+function isInTooele(l: Listing): boolean {
+  const city = (l.location.city ?? "").toLowerCase().trim();
+  const zip = (l.location.postalCode ?? "").trim();
+  const county = (l.location.county ?? "").toLowerCase().trim();
   if (county === "tooele") return true;
-  if (TOOELE_CITIES.includes(city)) return true;
+  if (TOOELE_CITIES_LOWER.includes(city)) return true;
   if (TOOELE_ZIPS.includes(zip)) return true;
   return false;
 }
 
-// IDX Broker returns slightly different shapes per endpoint.
-// This shape covers /clients/featured and /clients/listing/{id}.
+// =============================================================
+// API response shape
+// =============================================================
 interface IDXBrokerListing {
   listingID: string;
   idxID?: string;
   idxStatus?: string;
-  address: string;
+  address?: string;
   streetName?: string;
   streetNumber?: string;
   streetDirection?: string;
   unitNumber?: string;
-  cityName: string;
+  cityName?: string;
   countyName?: string;
-  state: string;
-  zipcode: string;
+  state?: string;
+  zipcode?: string;
   listingPrice?: string;
   originalPrice?: string;
   bedrooms?: string;
@@ -95,9 +102,7 @@ interface IDXBrokerListing {
   taxes?: string;
   hoaDues?: string;
   hoaDuesPer?: string;
-  image?: {
-    [index: string]: { url: string; caption?: string };
-  } & { totalCount?: number };
+  image?: Record<string, unknown>;
   agentID?: string;
   agentName?: string;
   agentEmail?: string;
@@ -112,7 +117,21 @@ interface IDXBrokerListing {
   lastUpdateMLS?: string;
 }
 
-// Map IDX Broker status strings to our internal RESO-style enum.
+// =============================================================
+// Helpers
+// =============================================================
+function num(v: unknown): number | undefined {
+  if (v === undefined || v === null || v === "") return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function str(v: unknown): string | undefined {
+  if (v === undefined || v === null) return undefined;
+  const s = String(v);
+  return s === "" ? undefined : s;
+}
+
 function mapStatus(idxStatus?: string): Listing["status"] {
   const s = (idxStatus ?? "").toLowerCase();
   if (s.includes("active")) return "Active";
@@ -132,31 +151,30 @@ function mapPropertyType(propType?: string): Listing["propertyType"] {
   return "Residential";
 }
 
-function num(v?: string): number | undefined {
-  if (v === undefined || v === null || v === "") return undefined;
-  const n = Number(v);
-  return Number.isFinite(n) ? n : undefined;
+function extractPhotos(image: IDXBrokerListing["image"]): Listing["photos"] {
+  if (!image || typeof image !== "object") return [];
+  const photos: Listing["photos"] = [];
+  Object.entries(image).forEach(([key, val]) => {
+    if (key === "totalCount" || !val || typeof val !== "object") return;
+    const photo = val as { url?: string; caption?: string };
+    if (!photo.url) return;
+    const order = Number(key);
+    photos.push({
+      url: photo.url,
+      caption: photo.caption,
+      order: Number.isFinite(order) ? order : photos.length,
+      isPrimary: Number.isFinite(order) && order === 0,
+    });
+  });
+  return photos.sort((a, b) => a.order - b.order);
 }
 
 function fromIDXBrokerListing(p: IDXBrokerListing): Listing {
-  // IDX Broker returns images as { 0: {url, caption}, 1: {...}, totalCount: N }
-  const photos: Listing["photos"] = [];
-  if (p.image) {
-    const { totalCount: _ignore, ...indexedPhotos } = p.image;
-    Object.entries(indexedPhotos).forEach(([idx, photo]) => {
-      if (photo && typeof photo === "object" && "url" in photo) {
-        photos.push({
-          url: (photo as { url: string }).url,
-          caption: (photo as { caption?: string }).caption,
-          order: Number(idx),
-          isPrimary: Number(idx) === 0,
-        });
-      }
-    });
-  }
-
   const listPrice = num(p.listingPrice) ?? 0;
   const livingArea = num(p.sqFt) ?? 0;
+
+  const streetParts = [p.streetNumber, p.streetDirection, p.streetName].filter(Boolean);
+  const street = p.address ?? streetParts.join(" ") ?? "";
 
   return {
     listingKey: p.listingID,
@@ -166,11 +184,11 @@ function fromIDXBrokerListing(p: IDXBrokerListing): Listing {
     propertySubType: p.propSubType as Listing["propertySubType"],
     publicRemarks: p.remarksConcat ?? "",
     location: {
-      street: p.address || [p.streetNumber, p.streetDirection, p.streetName].filter(Boolean).join(" "),
+      street,
       unit: p.unitNumber,
-      city: p.cityName,
-      state: p.state,
-      postalCode: p.zipcode,
+      city: p.cityName ?? "",
+      state: p.state ?? "UT",
+      postalCode: p.zipcode ?? "",
       county: p.countyName,
       subdivision: p.subdivision,
       latitude: num(p.latitude),
@@ -182,7 +200,7 @@ function fromIDXBrokerListing(p: IDXBrokerListing): Listing {
       pricePerSqft: livingArea > 0 ? Math.round(listPrice / livingArea) : undefined,
       taxAnnualAmount: num(p.taxes),
       hoaFee: num(p.hoaDues),
-      hoaFrequency: (p.hoaDuesPer as Listing["financial"]["hoaFrequency"]) || undefined,
+      hoaFrequency: p.hoaDuesPer as Listing["financial"]["hoaFrequency"],
     },
     features: {
       bedrooms: num(p.bedrooms) ?? 0,
@@ -201,9 +219,9 @@ function fromIDXBrokerListing(p: IDXBrokerListing): Listing {
       highSchool: p.highSchool,
       schoolDistrict: p.schoolDistrict,
     },
-    photos,
-    videoUrl: p.videoTour,
-    virtualTourUrl: p.virtualTourURL,
+    photos: extractPhotos(p.image),
+    videoUrl: str(p.videoTour),
+    virtualTourUrl: str(p.virtualTourURL),
     listAgent: {
       fullName: p.agentName ?? "",
       email: p.agentEmail,
@@ -219,11 +237,25 @@ function fromIDXBrokerListing(p: IDXBrokerListing): Listing {
     onMarketDate: p.listDate,
     modificationTimestamp: p.lastUpdateMLS ?? new Date().toISOString(),
     hasVideoTour: Boolean(p.videoTour || p.virtualTourURL),
-    isPremierListing: true, // assume listings from our account
+    isPremierListing: true,
   };
 }
 
-function buildHeaders(): HeadersInit {
+function normalizeResponse(data: unknown): IDXBrokerListing[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data as IDXBrokerListing[];
+  if (typeof data !== "object") return [];
+
+  const obj = data as Record<string, unknown>;
+  if (Array.isArray(obj.listings)) return obj.listings as IDXBrokerListing[];
+
+  // IDX Broker often returns objects keyed by listingID — { "abc123": {...}, "def456": {...} }
+  return Object.values(obj).filter(
+    (v): v is IDXBrokerListing => v !== null && typeof v === "object",
+  );
+}
+
+function buildHeaders(): Record<string, string> {
   if (!ACCESS_KEY) {
     throw new Error(
       "IDX_BROKER_ACCESS_KEY is not set. Configure it in Railway → Variables and locally in .env.local.",
@@ -238,10 +270,10 @@ function buildHeaders(): HeadersInit {
   return headers;
 }
 
-async function fetchIDX<T>(path: string): Promise<T> {
+async function fetchIDX<T = unknown>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
     headers: buildHeaders(),
-    next: { revalidate: 300 }, // 5-min ISR cache
+    next: { revalidate: 300 },
   });
   if (!res.ok) {
     throw new Error(`IDX Broker API ${res.status} for ${path}: ${await res.text()}`);
@@ -249,25 +281,27 @@ async function fetchIDX<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
+// =============================================================
+// Provider implementation
+// =============================================================
 export const idxBrokerProvider: MLSProvider = {
   name: "idxbroker",
 
-  async getListing(listingKey) {
-    // IDX Broker requires the idxID along with listingID for some accounts.
-    // We try the simpler form first; pass idxID if account requires it.
+  async getListing(listingKey: string): Promise<Listing | null> {
     try {
-      const data = await fetchIDX<IDXBrokerListing | IDXBrokerListing[]>(
-        `/clients/listing/${encodeURIComponent(listingKey)}`,
-      );
-      const listing = Array.isArray(data) ? data[0] : data;
-      return listing ? fromIDXBrokerListing(listing) : null;
+      const data = await fetchIDX(`/clients/listing/${encodeURIComponent(listingKey)}`);
+      const arr = normalizeResponse(data);
+      return arr.length > 0 ? fromIDXBrokerListing(arr[0]) : null;
     } catch (err) {
       console.error("[idxBroker] getListing failed:", err);
       return null;
     }
   },
 
-  async searchListings(filters = {}, options = {}) {
+  async searchListings(
+    filters: ListingSearchFilters = {},
+    options: ListingSearchOptions = {},
+  ): Promise<ListingSearchResult> {
     const useMLSSearch = !filters.isPremierListing;
     const path = useMLSSearch ? `/mls/search/${ACCOUNT_ID ?? ""}` : "/clients/activels";
 
@@ -278,30 +312,21 @@ export const idxBrokerProvider: MLSProvider = {
     if (filters.minBathrooms) params.set("ba", String(filters.minBathrooms));
     if (filters.minLivingArea) params.set("sqft", String(filters.minLivingArea));
 
-    // Default to Tooele cities unless the caller specifies a city.
     if (filters.city) {
       const cities = Array.isArray(filters.city) ? filters.city : [filters.city];
       params.set("city", cities.join(","));
     } else {
-      params.set("city", TOOELE_CITIES.map((c) => c.split(" ").map((w) => w[0].toUpperCase() + w.slice(1)).join(" ")).join(","));
+      params.set("city", TOOELE_CITIES.join(","));
     }
 
-    if (options.limit) params.set("per", String(Math.max(options.limit, 50))); // request extra so post-filter still has supply
+    if (options.limit) params.set("per", String(Math.max(options.limit, 50)));
     if (options.offset) params.set("start", String(options.offset));
 
     const qs = params.toString();
     try {
-      const data = await fetchIDX<IDXBrokerListing[] | { listings: IDXBrokerListing[] } | Record<string, IDXBrokerListing>>(
-        `${path}${qs ? `?${qs}` : ""}`,
-      );
-      const arr: IDXBrokerListing[] = Array.isArray(data)
-        ? data
-        : "listings" in (data as object)
-        ? (data as { listings: IDXBrokerListing[] }).listings
-        : Object.values(data as Record<string, IDXBrokerListing>);
-
-      const all = arr.map(fromIDXBrokerListing);
-      const tooele = all.filter(isInTooele); // hard geo guard
+      const data = await fetchIDX(`${path}${qs ? `?${qs}` : ""}`);
+      const arr = normalizeResponse(data);
+      const tooele = arr.map(fromIDXBrokerListing).filter(isInTooele);
 
       const limit = options.limit ?? tooele.length;
       const offset = options.offset ?? 0;
@@ -310,23 +335,18 @@ export const idxBrokerProvider: MLSProvider = {
         total: tooele.length,
         limit,
         offset,
-      } satisfies ListingSearchResult;
+      };
     } catch (err) {
       console.error("[idxBroker] searchListings failed:", err);
       return { listings: [], total: 0, limit: options.limit ?? 0, offset: options.offset ?? 0 };
     }
   },
 
-  async getFeaturedListings(limit = 6) {
-    // Strategy:
-    //   1. Try /clients/featured (broker-curated, owned by account)
-    //   2. Fall back to /clients/activels (all active listings on account)
-    //   3. Final fallback: /mls/search filtered to Tooele cities
-    // Always post-filter to Tooele geography so out-of-area listings never render.
+  async getFeaturedListings(limit = 6): Promise<Listing[]> {
     const tryEndpoint = async (path: string): Promise<Listing[]> => {
       try {
-        const data = await fetchIDX<IDXBrokerListing[] | Record<string, IDXBrokerListing>>(path);
-        const arr = Array.isArray(data) ? data : Object.values(data ?? {});
+        const data = await fetchIDX(path);
+        const arr = normalizeResponse(data);
         return arr.map(fromIDXBrokerListing).filter(isInTooele);
       } catch (err) {
         console.warn(`[idxBroker] ${path} unavailable:`, err);
@@ -338,9 +358,8 @@ export const idxBrokerProvider: MLSProvider = {
     if (listings.length === 0) listings = await tryEndpoint("/clients/activels");
 
     if (listings.length === 0) {
-      // Last resort: MLS-wide IDX search restricted to Tooele cities
       console.info("[idxBroker] falling back to /mls/search for Tooele");
-      const result = await this.searchListings(
+      const result = await idxBrokerProvider.searchListings(
         { status: "Active" },
         { limit: 50, orderBy: "ModificationTimestamp" },
       );
