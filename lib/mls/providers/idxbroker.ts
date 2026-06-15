@@ -336,39 +336,21 @@ export const idxBrokerProvider: MLSProvider = {
   },
 
   async searchListings(
-    filters: ListingSearchFilters = {},
+    _filters: ListingSearchFilters = {},
     options: ListingSearchOptions = {},
   ): Promise<ListingSearchResult> {
-    // /mls/search needs the IDX feed ID (e.g. "a001"), not the account ID.
-    // Fetch the approved feeds once and use the first one.
-    const idxIds = await getApprovedIdxIds();
-    const idxID = idxIds[0];
-
-    const useMLSSearch = !filters.isPremierListing && idxID;
-    const path = useMLSSearch ? `/mls/search/${idxID}` : "/clients/activels";
-
-    const params = new URLSearchParams();
-    if (filters.minPrice) params.set("lp", String(filters.minPrice));
-    if (filters.maxPrice) params.set("hp", String(filters.maxPrice));
-    if (filters.minBedrooms) params.set("bd", String(filters.minBedrooms));
-    if (filters.minBathrooms) params.set("ba", String(filters.minBathrooms));
-    if (filters.minLivingArea) params.set("sqft", String(filters.minLivingArea));
-
-    // City filter — let IDX Broker decide everything via post-filter to be safe.
-    if (filters.city) {
-      const cities = Array.isArray(filters.city) ? filters.city : [filters.city];
-      params.set("city", cities.join(","));
-    }
-
-    if (options.limit) params.set("per", String(Math.max(options.limit, 50)));
-    if (options.offset) params.set("start", String(options.offset));
-
-    const qs = params.toString();
+    // NOTE: Per IDX Broker's API docs, there is no /mls/search method
+    // available to Client-tier accounts. The /clients/* endpoints only
+    // return the office's own listings (featured / offmarket / soldpending
+    // / supplemental). For MLS-wide search the visitor uses our existing
+    // widget at forsale.homesintooele.com.
+    //
+    // This method now fetches /clients/featured and lets the caller filter
+    // post-hoc. It also returns soldpending as a secondary source if needed.
     try {
-      const data = await fetchIDX(`${path}${qs ? `?${qs}` : ""}`);
+      const data = await fetchIDX("/clients/featured");
       const arr = normalizeResponse(data);
       const tooele = arr.map(fromIDXBrokerListing).filter(isInTooele);
-
       const limit = options.limit ?? tooele.length;
       const offset = options.offset ?? 0;
       return {
@@ -378,38 +360,35 @@ export const idxBrokerProvider: MLSProvider = {
         offset,
       };
     } catch (err) {
-      console.error("[idxBroker] searchListings failed:", err);
+      console.error("[idxBroker] searchListings (/clients/featured) failed:", err);
       return { listings: [], total: 0, limit: options.limit ?? 0, offset: options.offset ?? 0 };
     }
   },
 
   async getFeaturedListings(limit = 6): Promise<Listing[]> {
-    // Per IDX Broker support, this plan tier only covers /clients/* endpoints
-    // (the office's own listings), not full /mls/search. So we don't fall
-    // through to MLS search — just use the two client endpoints.
-    const tryEndpoint = async (path: string): Promise<Listing[]> => {
-      try {
-        const data = await fetchIDX(path);
-        const arr = normalizeResponse(data);
-        // Don't post-filter to Tooele on office listings — Premier is a Tooele
-        // brokerage so all their listings should already be in-county.
-        return arr.map(fromIDXBrokerListing);
-      } catch (err) {
-        console.warn(`[idxBroker] ${path} unavailable:`, err);
-        return [];
+    // Per IDX Broker API docs, the Client tier has these listing methods:
+    //   /clients/featured     — office's featured (active) properties
+    //   /clients/offmarket    — off-market
+    //   /clients/soldpending  — sold/pending
+    //   /clients/supplemental — non-MLS supplemental
+    // There is NO /clients/activels (we used to call it — guaranteed 400).
+    // There is NO /mls/search at Client tier (Partner-tier only).
+    //
+    // If Premier has no featured properties marked in their IDX Broker
+    // dashboard, this returns an empty array.
+    try {
+      const data = await fetchIDX("/clients/featured");
+      const arr = normalizeResponse(data);
+      if (arr.length === 0) {
+        console.info(
+          "[idxBroker] /clients/featured returned no listings. " +
+            "Mark listings as 'featured' in IDX Broker → Properties → Featured to populate this.",
+        );
       }
-    };
-
-    let listings = await tryEndpoint("/clients/featured");
-    if (listings.length === 0) listings = await tryEndpoint("/clients/activels");
-
-    if (listings.length === 0) {
-      console.info(
-        "[idxBroker] no office listings returned. " +
-          "Check IDX Broker → My Office → Listings, ensure listings are imported/synced.",
-      );
+      return arr.map(fromIDXBrokerListing).slice(0, limit);
+    } catch (err) {
+      console.error("[idxBroker] /clients/featured failed:", err);
+      return [];
     }
-
-    return listings.slice(0, limit);
   },
 };
